@@ -1,0 +1,892 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>NovaPay — Secure Checkout</title>
+<link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@300;400;500;600&family=DM+Mono:wght@400;500&display=swap" rel="stylesheet">
+<style>
+  :root {
+    --bg: #0c0c0f;
+    --surface: #13131a;
+    --surface2: #1a1a24;
+    --border: #ffffff0f;
+    --border-active: #ffffff22;
+    --text: #f0f0f5;
+    --muted: #6b6b80;
+    --accent: #7c6eff;
+    --accent-glow: #7c6eff33;
+    --success: #22c55e;
+    --success-glow: #22c55e22;
+    --error: #ef4444;
+    --error-glow: #ef444422;
+    --warning: #f59e0b;
+  }
+
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+
+  body {
+    background: var(--bg);
+    color: var(--text);
+    font-family: 'DM Sans', sans-serif;
+    min-height: 100vh;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    overflow: hidden;
+    position: relative;
+  }
+
+  /* Ambient background */
+  body::before {
+    content: '';
+    position: fixed;
+    width: 600px;
+    height: 600px;
+    background: radial-gradient(circle, #7c6eff18 0%, transparent 70%);
+    top: -100px;
+    right: -100px;
+    pointer-events: none;
+    animation: drift 8s ease-in-out infinite alternate;
+  }
+
+  body::after {
+    content: '';
+    position: fixed;
+    width: 400px;
+    height: 400px;
+    background: radial-gradient(circle, #22c55e0a 0%, transparent 70%);
+    bottom: -50px;
+    left: -50px;
+    pointer-events: none;
+    animation: drift 10s ease-in-out infinite alternate-reverse;
+  }
+
+  @keyframes drift {
+    from { transform: translate(0, 0); }
+    to { transform: translate(30px, 20px); }
+  }
+
+  .page {
+    display: grid;
+    grid-template-columns: 1fr 420px;
+    gap: 0;
+    width: 900px;
+    min-height: 560px;
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 24px;
+    overflow: hidden;
+    box-shadow: 0 40px 120px rgba(0,0,0,0.6), 0 0 0 1px var(--border);
+    position: relative;
+    z-index: 1;
+    animation: pageIn 0.6s cubic-bezier(0.16, 1, 0.3, 1) both;
+  }
+
+  @keyframes pageIn {
+    from { opacity: 0; transform: translateY(24px) scale(0.98); }
+    to { opacity: 1; transform: translateY(0) scale(1); }
+  }
+
+  /* Left panel — order summary */
+  .summary {
+    background: var(--surface2);
+    padding: 48px 40px;
+    display: flex;
+    flex-direction: column;
+    border-right: 1px solid var(--border);
+    position: relative;
+    overflow: hidden;
+  }
+
+  .summary::before {
+    content: '';
+    position: absolute;
+    top: 0; left: 0; right: 0;
+    height: 2px;
+    background: linear-gradient(90deg, var(--accent), transparent);
+  }
+
+  .brand {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    margin-bottom: 48px;
+  }
+
+  .brand-icon {
+    width: 36px;
+    height: 36px;
+    background: var(--accent);
+    border-radius: 10px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 18px;
+  }
+
+  .brand-name {
+    font-size: 20px;
+    font-weight: 600;
+    letter-spacing: -0.3px;
+  }
+
+  .brand-name span {
+    color: var(--accent);
+  }
+
+  .order-label {
+    font-size: 11px;
+    letter-spacing: 2px;
+    text-transform: uppercase;
+    color: var(--muted);
+    margin-bottom: 24px;
+  }
+
+  .order-item {
+    display: flex;
+    align-items: center;
+    gap: 16px;
+    padding: 16px 0;
+    border-bottom: 1px solid var(--border);
+    animation: itemIn 0.4s ease both;
+  }
+
+  .order-item:nth-child(2) { animation-delay: 0.1s; }
+  .order-item:nth-child(3) { animation-delay: 0.2s; }
+  .order-item:nth-child(4) { animation-delay: 0.3s; }
+
+  @keyframes itemIn {
+    from { opacity: 0; transform: translateX(-12px); }
+    to { opacity: 1; transform: translateX(0); }
+  }
+
+  .item-icon {
+    width: 44px;
+    height: 44px;
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 20px;
+    flex-shrink: 0;
+  }
+
+  .item-info { flex: 1; }
+  .item-name { font-size: 14px; font-weight: 500; margin-bottom: 3px; }
+  .item-desc { font-size: 12px; color: var(--muted); }
+  .item-price { font-family: 'DM Mono', monospace; font-size: 14px; font-weight: 500; }
+
+  .divider { flex: 1; }
+
+  .total-row {
+    padding-top: 20px;
+    display: flex;
+    justify-content: space-between;
+    align-items: baseline;
+  }
+
+  .total-label { font-size: 13px; color: var(--muted); }
+
+  .total-amount {
+    font-family: 'DM Mono', monospace;
+    font-size: 28px;
+    font-weight: 500;
+    color: var(--text);
+  }
+
+  .total-amount span { font-size: 16px; color: var(--muted); }
+
+  /* Right panel — payment form */
+  .form-panel {
+    padding: 48px 40px;
+    display: flex;
+    flex-direction: column;
+  }
+
+  .form-title {
+    font-size: 22px;
+    font-weight: 600;
+    letter-spacing: -0.4px;
+    margin-bottom: 6px;
+  }
+
+  .form-subtitle {
+    font-size: 13px;
+    color: var(--muted);
+    margin-bottom: 32px;
+  }
+
+  .security-badges {
+    display: flex;
+    gap: 8px;
+    margin-bottom: 28px;
+  }
+
+  .badge {
+    display: flex;
+    align-items: center;
+    gap: 5px;
+    background: var(--surface2);
+    border: 1px solid var(--border);
+    border-radius: 20px;
+    padding: 4px 10px;
+    font-size: 11px;
+    color: var(--muted);
+  }
+
+  .badge-dot {
+    width: 6px;
+    height: 6px;
+    border-radius: 50%;
+    background: var(--success);
+    animation: pulse 2s infinite;
+  }
+
+  @keyframes pulse {
+    0%, 100% { opacity: 1; }
+    50% { opacity: 0.4; }
+  }
+
+  /* Card visual */
+  .card-visual {
+    background: linear-gradient(135deg, #1e1e2e, #2d2b55);
+    border: 1px solid var(--border-active);
+    border-radius: 16px;
+    padding: 20px 22px;
+    margin-bottom: 24px;
+    position: relative;
+    overflow: hidden;
+  }
+
+  .card-visual::before {
+    content: '';
+    position: absolute;
+    top: -40px; right: -40px;
+    width: 120px; height: 120px;
+    border-radius: 50%;
+    background: var(--accent-glow);
+  }
+
+  .card-chip {
+    width: 32px;
+    height: 24px;
+    background: linear-gradient(135deg, #d4a843, #f0c860);
+    border-radius: 5px;
+    margin-bottom: 16px;
+  }
+
+  .card-number-display {
+    font-family: 'DM Mono', monospace;
+    font-size: 15px;
+    letter-spacing: 3px;
+    margin-bottom: 16px;
+    color: rgba(255,255,255,0.9);
+  }
+
+  .card-footer {
+    display: flex;
+    justify-content: space-between;
+    align-items: flex-end;
+  }
+
+  .card-holder { font-size: 11px; color: rgba(255,255,255,0.5); text-transform: uppercase; letter-spacing: 1px; }
+  .card-holder-name { font-size: 13px; color: rgba(255,255,255,0.85); margin-top: 2px; }
+  .card-expiry-label { font-size: 11px; color: rgba(255,255,255,0.5); text-align: right; }
+  .card-expiry-val { font-family: 'DM Mono', monospace; font-size: 13px; color: rgba(255,255,255,0.85); text-align: right; margin-top: 2px; }
+
+  /* Inputs */
+  .field { margin-bottom: 14px; }
+
+  .field label {
+    display: block;
+    font-size: 11px;
+    letter-spacing: 1px;
+    text-transform: uppercase;
+    color: var(--muted);
+    margin-bottom: 6px;
+  }
+
+  .field input {
+    width: 100%;
+    background: var(--surface2);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    padding: 12px 14px;
+    color: var(--text);
+    font-family: 'DM Mono', monospace;
+    font-size: 14px;
+    outline: none;
+    transition: border-color 0.2s, box-shadow 0.2s;
+  }
+
+  .field input:focus {
+    border-color: var(--accent);
+    box-shadow: 0 0 0 3px var(--accent-glow);
+  }
+
+  .field-row { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+
+  /* Pay button */
+  .pay-btn {
+    width: 100%;
+    padding: 15px;
+    background: var(--accent);
+    border: none;
+    border-radius: 12px;
+    color: white;
+    font-family: 'DM Sans', sans-serif;
+    font-size: 15px;
+    font-weight: 600;
+    cursor: pointer;
+    margin-top: 8px;
+    position: relative;
+    overflow: hidden;
+    transition: transform 0.15s, box-shadow 0.15s;
+    letter-spacing: 0.2px;
+  }
+
+  .pay-btn:hover:not(:disabled) {
+    transform: translateY(-1px);
+    box-shadow: 0 8px 30px var(--accent-glow);
+  }
+
+  .pay-btn:active:not(:disabled) {
+    transform: translateY(0);
+  }
+
+  .pay-btn:disabled { opacity: 0.7; cursor: not-allowed; }
+
+  .pay-btn .btn-shimmer {
+    position: absolute;
+    top: 0; left: -100%;
+    width: 60%;
+    height: 100%;
+    background: linear-gradient(90deg, transparent, rgba(255,255,255,0.15), transparent);
+    transition: left 0.4s;
+  }
+
+  .pay-btn:hover .btn-shimmer { left: 150%; }
+
+  /* Status overlay */
+  .status-overlay {
+    display: none;
+    position: absolute;
+    inset: 0;
+    background: var(--surface);
+    border-radius: 24px;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    z-index: 10;
+    animation: overlayIn 0.3s ease both;
+  }
+
+  @keyframes overlayIn {
+    from { opacity: 0; }
+    to { opacity: 1; }
+  }
+
+  .status-overlay.show { display: flex; }
+
+  .status-icon {
+    width: 80px;
+    height: 80px;
+    border-radius: 50%;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 36px;
+    margin-bottom: 24px;
+    animation: iconPop 0.4s cubic-bezier(0.175, 0.885, 0.32, 1.275) both;
+    animation-delay: 0.1s;
+  }
+
+  @keyframes iconPop {
+    from { transform: scale(0); opacity: 0; }
+    to { transform: scale(1); opacity: 1; }
+  }
+
+  .status-overlay.success .status-icon {
+    background: var(--success-glow);
+    border: 2px solid var(--success);
+    color: var(--success);
+  }
+
+  .status-overlay.error .status-icon {
+    background: var(--error-glow);
+    border: 2px solid var(--error);
+    color: var(--error);
+  }
+
+  .status-overlay.loading .status-icon {
+    background: var(--accent-glow);
+    border: 2px solid var(--accent);
+    color: var(--accent);
+    animation: spin 1s linear infinite;
+  }
+
+  @keyframes spin {
+    from { transform: rotate(0deg); }
+    to { transform: rotate(360deg); }
+  }
+
+  .status-title {
+    font-size: 24px;
+    font-weight: 600;
+    margin-bottom: 8px;
+    letter-spacing: -0.3px;
+    animation: textUp 0.4s ease both;
+    animation-delay: 0.2s;
+  }
+
+  .status-subtitle {
+    font-size: 14px;
+    color: var(--muted);
+    text-align: center;
+    max-width: 280px;
+    line-height: 1.6;
+    animation: textUp 0.4s ease both;
+    animation-delay: 0.25s;
+  }
+
+  @keyframes textUp {
+    from { opacity: 0; transform: translateY(10px); }
+    to { opacity: 1; transform: translateY(0); }
+  }
+
+  .status-overlay.success .status-title { color: var(--success); }
+  .status-overlay.error .status-title { color: var(--error); }
+
+  .status-meta {
+    margin-top: 20px;
+    background: var(--surface2);
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    padding: 14px 20px;
+    text-align: center;
+    animation: textUp 0.4s ease both;
+    animation-delay: 0.3s;
+    min-width: 260px;
+  }
+
+  .status-meta .meta-row {
+    display: flex;
+    justify-content: space-between;
+    font-size: 12px;
+    color: var(--muted);
+    padding: 3px 0;
+  }
+
+  .status-meta .meta-row span:last-child {
+    font-family: 'DM Mono', monospace;
+    color: var(--text);
+  }
+
+  .try-again {
+    margin-top: 20px;
+    padding: 10px 28px;
+    background: transparent;
+    border: 1px solid var(--border-active);
+    border-radius: 8px;
+    color: var(--muted);
+    font-family: 'DM Sans', sans-serif;
+    font-size: 13px;
+    cursor: pointer;
+    transition: all 0.2s;
+    animation: textUp 0.4s ease both;
+    animation-delay: 0.35s;
+  }
+
+  .try-again:hover { border-color: var(--accent); color: var(--accent); }
+
+  /* System status bar */
+  .sys-bar {
+    position: fixed;
+    bottom: 24px;
+    left: 50%;
+    transform: translateX(-50%);
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 40px;
+    padding: 8px 20px;
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    font-size: 12px;
+    color: var(--muted);
+    z-index: 100;
+    backdrop-filter: blur(10px);
+  }
+
+  .sys-indicator {
+    width: 8px;
+    height: 8px;
+    border-radius: 50%;
+    background: var(--success);
+    animation: pulse 2s infinite;
+  }
+
+  .sys-indicator.degraded { background: var(--error); }
+  .sys-indicator.warning { background: var(--warning); }
+
+  /* Neuro-ops badge */
+  .neuroops-badge {
+    position: fixed;
+    top: 24px;
+    right: 24px;
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    padding: 10px 16px;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    font-size: 12px;
+    color: var(--muted);
+    z-index: 100;
+    cursor: pointer;
+    transition: all 0.2s;
+    text-decoration: none;
+  }
+
+  .neuroops-badge:hover {
+    border-color: var(--accent);
+    color: var(--accent);
+  }
+
+  .neuroops-badge .dot {
+    width: 8px; height: 8px;
+    border-radius: 50%;
+    background: var(--accent);
+    animation: pulse 2s infinite;
+  }
+
+  /* Transaction counter */
+  .tx-counter {
+    position: fixed;
+    top: 24px;
+    left: 24px;
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    padding: 10px 16px;
+    font-size: 12px;
+    color: var(--muted);
+    z-index: 100;
+    font-family: 'DM Mono', monospace;
+  }
+
+  .tx-counter span { color: var(--text); font-weight: 500; }
+
+  .demo-sidebar {
+  position: fixed;
+  left: 0;
+  top: 50%;
+  transform: translateY(-50%);
+  width: 180px;
+  background: rgba(15, 23, 42, 0.85);
+  backdrop-filter: blur(10px);
+  border: 1px solid #1e293b;
+  border-left: none;
+  border-radius: 0 10px 10px 0;
+  padding: 12px;
+  z-index: 1000;
+}
+
+.demo-title {
+  font-size: 11px;
+  color: #6b7280;
+  margin-bottom: 10px;
+  letter-spacing: 1px;
+}
+
+.demo-sidebar button {
+  width: 100%;
+  margin-bottom: 8px;
+  padding: 8px 10px;
+  background: #020617;
+  border: 1px solid #1e293b;
+  color: #d1d5db;
+  font-size: 12px;
+  border-radius: 6px;
+  cursor: pointer;
+  transition: all 0.2s ease;
+}
+
+.demo-sidebar button:hover {
+  border-color: #7c6eff;
+  color: #ffffff;
+  transform: translateX(2px);
+}
+</style>
+</head>
+<body>
+
+
+<!-- Top badges -->
+<div class="tx-counter">TXN <span id="txCount">0</span> processed today</div>
+<a href="http://localhost:3001" target="_blank" class="neuroops-badge">
+  <div class="dot"></div>
+  ⬡ Neuro-Ops Monitor
+</a>
+
+<!-- Main page -->
+<div class="page" id="mainPage">
+
+  <!-- Left: Order Summary -->
+  <div class="summary">
+    <div class="brand">
+      <div class="brand-icon">⚡</div>
+      <div class="brand-name">Nova<span>Pay</span></div>
+    </div>
+
+    <div class="order-label">Order Summary</div>
+
+    <div class="order-item">
+      <div class="item-icon">☁️</div>
+      <div class="item-info">
+        <div class="item-name">Cloud Pro Plan</div>
+        <div class="item-desc">Annual subscription · 1 seat</div>
+      </div>
+      <div class="item-price">₹3,999</div>
+    </div>
+
+    <div class="order-item">
+      <div class="item-icon">🔒</div>
+      <div class="item-info">
+        <div class="item-name">Security Shield Add-on</div>
+        <div class="item-desc">Advanced threat protection</div>
+      </div>
+      <div class="item-price">₹999</div>
+    </div>
+
+    <div class="order-item">
+      <div class="item-icon">📊</div>
+      <div class="item-info">
+        <div class="item-name">Analytics Dashboard</div>
+        <div class="item-desc">Real-time insights · 1 year</div>
+      </div>
+      <div class="item-price">₹499</div>
+    </div>
+
+    <div class="divider"></div>
+
+    <div class="total-row">
+      <div>
+        <div class="total-label">Total due today</div>
+      </div>
+      <div class="total-amount"><span>₹</span>5,497</div>
+    </div>
+  </div>
+
+  <!-- Right: Payment Form -->
+  <div class="form-panel">
+    <div class="form-title">Payment Details</div>
+    <div class="form-subtitle">All transactions are encrypted and secure</div>
+
+    <div class="security-badges">
+      <div class="badge"><div class="badge-dot"></div>256-bit SSL</div>
+      <div class="badge"><div class="badge-dot"></div>PCI DSS</div>
+      <div class="badge"><div class="badge-dot"></div>Secure</div>
+    </div>
+
+    <div class="card-visual">
+      <div class="card-chip"></div>
+      <div class="card-number-display" id="cardDisplay">•••• •••• •••• 3456</div>
+      <div class="card-footer">
+        <div>
+          <div class="card-holder">Card Holder</div>
+          <div class="card-holder-name">DEMO USER</div>
+        </div>
+        <div>
+          <div class="card-expiry-label">Expires</div>
+          <div class="card-expiry-val">12/29</div>
+        </div>
+      </div>
+    </div>
+
+    <div class="field">
+      <label>Card Number</label>
+      <input type="text" value="4242 4242 4242 3456" id="cardInput"
+        oninput="updateCard(this.value)" maxlength="19">
+    </div>
+
+    <div class="field-row">
+      <div class="field">
+        <label>Expiry Date</label>
+        <input type="text" value="12/29" placeholder="MM/YY">
+      </div>
+      <div class="field">
+        <label>CVV</label>
+        <input type="password" value="123" maxlength="3" placeholder="•••">
+      </div>
+    </div>
+
+    <div class="field">
+      <label>Cardholder Name</label>
+      <input type="text" value="Demo User" placeholder="Full name">
+    </div>
+
+    <button class="pay-btn" onclick="processPayment()" id="payBtn">
+      <div class="btn-shimmer"></div>
+      Pay ₹5,497 Securely
+    </button>
+  </div>
+
+  <!-- Status Overlay -->
+  <div class="status-overlay" id="statusOverlay">
+    <div class="status-icon" id="statusIcon">✓</div>
+    <div class="status-title" id="statusTitle">Payment Successful</div>
+    <div class="status-subtitle" id="statusSubtitle">Your transaction has been processed</div>
+    <div class="status-meta" id="statusMeta">
+      <div class="meta-row"><span>Transaction ID</span><span id="txId">—</span></div>
+      <div class="meta-row"><span>Amount</span><span>₹5,497.00</span></div>
+      <div class="meta-row"><span>Status</span><span id="txStatus">—</span></div>
+      <div class="meta-row"><span>Time</span><span id="txTime">—</span></div>
+    </div>
+    <button class="try-again" onclick="reset()" id="tryAgainBtn">Make another payment</button>
+  </div>
+</div>
+
+<!-- System status bar -->
+<div class="sys-bar">
+  <div class="sys-indicator" id="sysIndicator"></div>
+  <span id="sysText">Payment gateway operational</span>
+  <span>·</span>
+  <span id="sysLatency">—ms</span>
+</div>
+
+
+<script>
+  let txCount = Math.floor(Math.random() * 8000) + 42000;
+  let checkInterval;
+
+  document.getElementById('txCount').textContent = txCount.toLocaleString();
+
+  // Increment counter naturally
+  setInterval(() => {
+    txCount += Math.floor(Math.random() * 3);
+    document.getElementById('txCount').textContent = txCount.toLocaleString();
+  }, 3000);
+
+  function updateCard(val) {
+    const last4 = val.replace(/\s/g, '').slice(-4) || '····';
+    document.getElementById('cardDisplay').textContent = `•••• •••• •••• ${last4}`;
+  }
+
+  function txId() {
+    return 'TXN' + Date.now().toString(36).toUpperCase();
+  }
+
+  async function processPayment() {
+    const btn = document.getElementById('payBtn');
+    const overlay = document.getElementById('statusOverlay');
+    const icon = document.getElementById('statusIcon');
+    const title = document.getElementById('statusTitle');
+    const subtitle = document.getElementById('statusSubtitle');
+    const sysIndicator = document.getElementById('sysIndicator');
+    const sysText = document.getElementById('sysText');
+    const sysLatency = document.getElementById('sysLatency');
+
+    // Disable button
+    btn.disabled = true;
+
+    // Show loading
+    overlay.className = 'status-overlay loading show';
+    icon.textContent = '↻';
+    title.textContent = 'Processing...';
+    subtitle.textContent = 'Verifying card details and authorizing payment';
+
+    const start = Date.now();
+
+    try {
+      const res = await fetch('http://localhost:5001/data', { signal: AbortSignal.timeout(8000) });
+      const latency = Date.now() - start;
+      sysLatency.textContent = latency + 'ms';
+
+      if (!res.ok) throw new Error('gateway_error');
+      const data = await res.json();
+      if (data.error) throw new Error('service_degraded');
+
+      // SUCCESS
+      await new Promise(r => setTimeout(r, 600));
+      overlay.className = 'status-overlay success show';
+      icon.textContent = '✓';
+      title.textContent = 'Payment Successful';
+      subtitle.textContent = 'Your subscription has been activated. A receipt has been sent to your email.';
+
+      document.getElementById('txId').textContent = txId();
+      document.getElementById('txStatus').textContent = 'APPROVED';
+      document.getElementById('txTime').textContent = new Date().toLocaleTimeString();
+      document.getElementById('tryAgainBtn').textContent = 'Make another payment';
+
+      sysIndicator.className = 'sys-indicator';
+      sysText.textContent = 'Payment gateway operational';
+
+      txCount++;
+      document.getElementById('txCount').textContent = txCount.toLocaleString();
+
+    } catch (e) {
+      const latency = Date.now() - start;
+      sysLatency.textContent = latency + 'ms';
+
+      // FAILURE
+      await new Promise(r => setTimeout(r, 400));
+      overlay.className = 'status-overlay error show';
+      icon.textContent = '✕';
+      title.textContent = 'Payment Failed';
+      subtitle.textContent = 'We couldn\'t process your payment. Our systems are experiencing issues. Please try again.';
+
+      document.getElementById('txId').textContent = txId();
+      document.getElementById('txStatus').textContent = 'DECLINED';
+      document.getElementById('txTime').textContent = new Date().toLocaleTimeString();
+      document.getElementById('tryAgainBtn').textContent = 'Try again';
+
+      sysIndicator.className = 'sys-indicator degraded';
+      sysText.textContent = 'Payment gateway degraded — Neuro-Ops responding';
+    }
+  }
+
+  function reset() {
+    document.getElementById('statusOverlay').className = 'status-overlay';
+    document.getElementById('payBtn').disabled = false;
+  }
+
+  // Poll system health for status bar
+  async function checkHealth() {
+    const sysIndicator = document.getElementById('sysIndicator');
+    const sysText = document.getElementById('sysText');
+    try {
+      const res = await fetch('http://localhost:5001/health', { signal: AbortSignal.timeout(2000) });
+      const data = await res.json();
+      if (data.status === 'healthy') {
+        sysIndicator.className = 'sys-indicator';
+        sysText.textContent = 'Payment gateway operational';
+      } else {
+        sysIndicator.className = 'sys-indicator warning';
+        sysText.textContent = 'Gateway degraded — Neuro-Ops monitoring';
+      }
+    } catch {
+      sysIndicator.className = 'sys-indicator degraded';
+      sysText.textContent = 'Gateway unreachable — Neuro-Ops responding';
+    }
+  }
+
+  checkHealth();
+  setInterval(checkHealth, 5000);
+
+  window.triggerDemo = async function(type) {
+  try {
+    await fetch(`http://localhost:5001/demo/${type}`);
+    console.log("Triggered:", type);
+  } catch (e) {
+    console.error("Demo trigger failed:", e);
+  }
+};
+
+</script>
+</body>
+</html>
