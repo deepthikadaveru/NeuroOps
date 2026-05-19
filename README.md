@@ -123,6 +123,22 @@ docker-compose up --build
 
 ---
 
+## Screenshots
+
+Neuro-Ops Dashboard – Normal Operation
+<img width="1015" height="536" alt="image" src="https://github.com/user-attachments/assets/6618a935-ceb6-4bb0-86b6-3f6002573a9c" />
+
+Neuro-Ops Dashboard – Anomaly Detected (Predicted Failure, Critical)
+<img width="978" height="518" alt="image" src="https://github.com/user-attachments/assets/3f6999e3-c845-4099-8594-ed3fc67e8590" />
+
+NovaPay Payment Gateway – Successful Transaction
+<img width="676" height="617" alt="image" src="https://github.com/user-attachments/assets/e4d112de-6288-4362-b425-a59d5d19b610" />
+
+NovaPay Payment Gateway – Payment Failure with Neuro-Ops Responding
+<img width="697" height="633" alt="image" src="https://github.com/user-attachments/assets/8567a67d-508d-4e13-8e85-5eaceaa615ce" />
+
+---
+
 ## Future Enhancements
 
 - Predictive failure analysis
