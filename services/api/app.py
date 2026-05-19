@@ -1,234 +1,155 @@
-"""
-NovaPay API Service
-10 distinct demo scenarios with unique metric signatures so the
-IsolationForest model can actually tell them apart.
-"""
-
 from flask import Flask, jsonify
 from prometheus_client import Counter, Gauge, generate_latest, CONTENT_TYPE_LATEST
 from flask_cors import CORS
 import random
 import time
 import threading
+import math
 
 app = Flask(__name__)
 CORS(app)
 
-# ── State ────────────────────────────────────────────────────────────────────
+# state
+degradation_level = 0
 current_scenario = "normal"
-scenario_start   = 0.0   # epoch time when scenario was triggered
+scenario_start = time.time()
 
-# Prometheus metrics
-REQUEST_COUNT  = Counter('api_requests_total',  'Total API requests')
-ERROR_COUNT    = Counter('api_errors_total',     'Total API errors')
-CPU_GAUGE      = Gauge('api_cpu_usage',          'Simulated CPU usage 0-1')
-MEMORY_GAUGE   = Gauge('api_memory_bytes',       'Simulated memory bytes')
-LATENCY_GAUGE  = Gauge('api_latency_seconds',    'Simulated response latency')
-ERROR_RATE_G   = Gauge('api_error_rate',         'Simulated error rate 0-1')
+# prometheus counters
+REQUEST_COUNT = Counter('api_requests_total', 'Total API requests')
+ERROR_COUNT   = Counter('api_errors_total',   'Total API errors')
 
-# ── Scenario definitions ──────────────────────────────────────────────────────
-# Each scenario returns a dict of metric overrides.
-# Metrics NOT listed fall back to normal ranges.
-# "elapsed" is seconds since scenario triggered (passed in at call time).
+# rich gauges — these are what Neuro-Ops reads via /metrics_json
+g_cpu        = Gauge('api_cpu_usage',       'Simulated CPU usage 0-1')
+g_memory     = Gauge('api_memory_bytes',    'Simulated memory bytes')
+g_latency    = Gauge('api_latency_seconds', 'Simulated latency seconds')
+g_error_rate = Gauge('api_error_rate',      'Current error rate 0-1')
+g_req_rate   = Gauge('api_request_rate',    'Requests per second')
 
-def _normal():
-    return dict(
-        cpu         = random.uniform(0.10, 0.25),
-        memory      = random.uniform(180_000_000, 220_000_000),
-        latency     = random.uniform(0.04, 0.10),
-        error_rate  = random.uniform(0.00, 0.02),
-        http_status = 200,
-    )
+BASE_MEMORY = 200_000_000  # 200 MB baseline
 
+
+# ── Scenario definitions ────────────────────────────────────────────────────
+# Each scenario produces a DISTINCT metric signature so the model can tell
+# them apart. Values are (cpu, latency, error_rate, memory_multiplier)
 SCENARIOS = {
-    # 1. Payment gateway failure — high errors, LOW cpu (gateway issue not compute)
-    "payment_failure": lambda elapsed: dict(
-        cpu         = random.uniform(0.10, 0.18),
-        memory      = random.uniform(190_000_000, 210_000_000),
-        latency     = random.uniform(0.08, 0.15),
-        error_rate  = random.uniform(0.75, 0.95),
-        http_status = 500,
-    ),
-
-    # 2. Traffic overload — HIGH cpu + HIGH latency together
-    "traffic_overload": lambda elapsed: dict(
-        cpu         = random.uniform(0.80, 0.95),
-        memory      = random.uniform(300_000_000, 380_000_000),
-        latency     = random.uniform(1.20, 2.50),
-        error_rate  = random.uniform(0.15, 0.30),
-        http_status = 200 if random.random() > 0.2 else 503,
-    ),
-
-    # 3. Memory leak — memory grows linearly over time, cpu/latency normal
-    "memory_leak": lambda elapsed: dict(
-        cpu         = random.uniform(0.20, 0.30),
-        memory      = 200_000_000 + elapsed * 8_000_000 + random.uniform(-5e6, 5e6),
-        latency     = random.uniform(0.05, 0.12),
-        error_rate  = random.uniform(0.00, 0.04),
-        http_status = 200,
-    ),
-
-    # 4. Bad deployment — sudden error spike after normal, cpu stays normal
-    "bad_deployment": lambda elapsed: dict(
-        cpu         = random.uniform(0.15, 0.25),
-        memory      = random.uniform(185_000_000, 215_000_000),
-        latency     = random.uniform(0.10, 0.20),
-        error_rate  = random.uniform(0.55, 0.80),
-        http_status = 500 if random.random() > 0.3 else 200,
-    ),
-
-    # 5. Database slowdown — latency high, errors moderate, cpu LOW
-    "db_slowdown": lambda elapsed: dict(
-        cpu         = random.uniform(0.08, 0.18),
-        memory      = random.uniform(190_000_000, 220_000_000),
-        latency     = random.uniform(2.00, 4.50),
-        error_rate  = random.uniform(0.20, 0.45),
-        http_status = 200 if random.random() > 0.35 else 504,
-    ),
-
-    # 6. Cascade failure — EVERYTHING high simultaneously
-    "cascade_failure": lambda elapsed: dict(
-        cpu         = random.uniform(0.85, 1.00),
-        memory      = random.uniform(450_000_000, 600_000_000),
-        latency     = random.uniform(3.00, 6.00),
-        error_rate  = random.uniform(0.70, 0.95),
-        http_status = 500,
-    ),
-
-    # 7. Network latency spike — latency very high, errors LOW, cpu normal
-    "network_latency": lambda elapsed: dict(
-        cpu         = random.uniform(0.12, 0.22),
-        memory      = random.uniform(185_000_000, 215_000_000),
-        latency     = random.uniform(3.00, 7.00),
-        error_rate  = random.uniform(0.00, 0.05),
-        http_status = 200,
-    ),
-
-    # 8. Service recovery — metrics improving back toward normal over time
-    "recovery": lambda elapsed: dict(
-        cpu         = max(0.12, 0.85 - elapsed * 0.05 + random.uniform(-0.05, 0.05)),
-        memory      = max(200_000_000, 500_000_000 - elapsed * 15_000_000),
-        latency     = max(0.06, 3.00 - elapsed * 0.15 + random.uniform(-0.1, 0.1)),
-        error_rate  = max(0.00, 0.80 - elapsed * 0.05 + random.uniform(-0.02, 0.02)),
-        http_status = 200 if elapsed > 8 else 503,
-    ),
-
-    # 9. Predicted failure — risk rising slowly (cpu + memory trending up together)
-    "predicted_failure": lambda elapsed: dict(
-        cpu         = min(0.90, 0.30 + elapsed * 0.04 + random.uniform(-0.02, 0.02)),
-        memory      = min(600_000_000, 220_000_000 + elapsed * 5_000_000),
-        latency     = min(2.0, 0.08 + elapsed * 0.03),
-        error_rate  = min(0.40, 0.02 + elapsed * 0.015),
-        http_status = 200,
-    ),
-
-    # 10. Resource exhaustion — cpu sustained very high, latency growing, errors low
-    "resource_exhaustion": lambda elapsed: dict(
-        cpu         = random.uniform(0.90, 0.99),
-        memory      = random.uniform(380_000_000, 480_000_000),
-        latency     = random.uniform(0.80, 1.60),
-        error_rate  = random.uniform(0.03, 0.10),
-        http_status = 200 if random.random() > 0.1 else 503,
-    ),
+    # name              cpu    latency  errors  mem_mult
+    "normal":          (0.15,  0.05,   0.00,   1.0),
+    "payment_failure": (0.18,  0.08,   0.95,   1.0),   # errors spike, cpu fine
+    "traffic_overload":(0.92,  0.85,   0.15,   1.3),   # cpu + latency spike
+    "slow_gateway":    (0.20,  2.40,   0.05,   1.0),   # latency only
+    "memory_leak":     (0.25,  0.10,   0.02,   3.5),   # memory only
+    "bad_deployment":  (0.22,  0.12,   0.88,   1.1),   # errors + slight cpu
+    "db_overload":     (0.45,  1.80,   0.40,   1.2),   # latency + errors + cpu
+    "cascade_failure": (0.95,  3.50,   0.99,   2.0),   # everything maxed
+    "network_spike":   (0.18,  4.20,   0.10,   1.0),   # latency only, extreme
+    "cpu_exhaustion":  (0.98,  0.30,   0.05,   1.1),   # cpu only
+    "intermittent":    (0.20,  0.15,   0.45,   1.0),   # medium errors, random
 }
 
-SCENARIO_RECOVERY_DELAY = {
-    "payment_failure":    12,
-    "traffic_overload":   15,
-    "memory_leak":        20,
-    "bad_deployment":     14,
-    "db_slowdown":        16,
-    "cascade_failure":    10,
-    "network_latency":    14,
-    "recovery":           18,
-    "predicted_failure":  25,
-    "resource_exhaustion": 18,
+# how long each scenario runs before auto-recovery (seconds)
+SCENARIO_DURATION = {
+    "payment_failure":  25,
+    "traffic_overload": 30,
+    "slow_gateway":     25,
+    "memory_leak":      40,
+    "bad_deployment":   25,
+    "db_overload":      30,
+    "cascade_failure":  20,
+    "network_spike":    25,
+    "cpu_exhaustion":   30,
+    "intermittent":     30,
 }
 
 
-def _get_metrics():
-    """Return current metric values based on active scenario."""
-    global current_scenario, scenario_start
-    elapsed = time.time() - scenario_start
+def get_metrics():
+    """Return current metric values with scenario-appropriate noise."""
+    s = SCENARIOS.get(current_scenario, SCENARIOS["normal"])
+    cpu_base, lat_base, err_base, mem_mult = s
 
-    if current_scenario == "normal" or current_scenario not in SCENARIOS:
-        return _normal()
+    t = time.time() - scenario_start
+    noise = math.sin(t * 0.5) * 0.03
 
-    return SCENARIOS[current_scenario](elapsed)
+    cpu     = max(0.0, min(1.0, cpu_base + noise + random.uniform(-0.02, 0.02)))
+    latency = max(0.0, lat_base + noise + random.uniform(-0.01, 0.01))
+    memory  = BASE_MEMORY * mem_mult + random.randint(-5_000_000, 5_000_000)
+
+    if current_scenario == "intermittent":
+        error_rate = err_base if random.random() > 0.4 else 0.02
+    else:
+        error_rate = max(0.0, min(1.0, err_base + random.uniform(-0.03, 0.03)))
+
+    return cpu, latency, error_rate, memory
 
 
-def _update_prometheus(m: dict):
-    CPU_GAUGE.set(m["cpu"])
-    MEMORY_GAUGE.set(m["memory"])
-    LATENCY_GAUGE.set(m["latency"])
-    ERROR_RATE_G.set(m["error_rate"])
-
-
-# ── Background metric emitter (keeps Prometheus fresh) ───────────────────────
-def _metric_emitter():
+def update_gauges():
+    """Background thread: update Prometheus gauges every 2 seconds."""
     while True:
-        m = _get_metrics()
-        _update_prometheus(m)
+        cpu, lat, err, mem = get_metrics()
+        g_cpu.set(cpu)
+        g_latency.set(lat)
+        g_error_rate.set(err)
+        g_memory.set(mem)
+        g_req_rate.set(random.uniform(80, 120) if current_scenario == "normal"
+                       else random.uniform(200, 500))
         time.sleep(2)
 
-threading.Thread(target=_metric_emitter, daemon=True).start()
+
+threading.Thread(target=update_gauges, daemon=True).start()
 
 
-# ── Auto recovery ─────────────────────────────────────────────────────────────
-def _auto_recover(delay: int):
-    global current_scenario
-    time.sleep(delay)
-    current_scenario = "normal"
-    print(f"[demo] auto-recovered after {delay}s")
+# ── Routes ──────────────────────────────────────────────────────────────────
 
-
-# ── Routes ────────────────────────────────────────────────────────────────────
-@app.route("/data")
-def data():
-    global current_scenario
-    REQUEST_COUNT.inc()
-    m = _get_metrics()
-    _update_prometheus(m)
-
-    if m["error_rate"] > 0.5:
-        ERROR_COUNT.inc()
-
-    if m["http_status"] != 200:
-        return jsonify({
-            "error": "service degraded",
-            "scenario": current_scenario,
-            "error_rate": round(m["error_rate"], 3),
-        }), m["http_status"]
-
-    # Simulate latency
-    time.sleep(min(m["latency"], 2.0))
-
+@app.route("/metrics_json")
+def metrics_json():
+    """Rich JSON metrics — primary source for Neuro-Ops collector."""
+    cpu, lat, err, mem = get_metrics()
     return jsonify({
-        "service":    "api",
-        "data":       [random.randint(1, 100) for _ in range(5)],
-        "scenario":   current_scenario,
-        "error_rate": round(m["error_rate"], 3),
-        "latency":    round(m["latency"], 3),
+        "cpu":          round(cpu, 4),
+        "latency":      round(lat, 4),
+        "error_rate":   round(err, 4),
+        "memory":       int(mem),
+        "request_rate": round(random.uniform(80, 150), 1),
+        "scenario":     current_scenario,
+        "degradation":  degradation_level,
     })
 
 
-@app.route("/fix")
-def fix_service():
-    global current_scenario
-    current_scenario = "normal"
-    return jsonify({"status": "recovered", "scenario": "normal"})
+@app.route("/data")
+def data():
+    global degradation_level
+    REQUEST_COUNT.inc()
+    cpu, lat, err, mem = get_metrics()
+
+    if err > 0.5 or degradation_level >= 4:
+        ERROR_COUNT.inc()
+        time.sleep(min(lat, 3.0))
+        return jsonify({
+            "error":    "service degraded",
+            "scenario": current_scenario
+        }), 500
+
+    if lat > 0.5:
+        time.sleep(min(lat, 3.0))
+
+    ERROR_COUNT.inc() if random.random() < err else None
+
+    return jsonify({
+        "service":  "api",
+        "data":     [random.randint(1, 100) for _ in range(5)],
+        "scenario": current_scenario,
+    })
 
 
 @app.route("/health")
 def health():
-    m = _get_metrics()
-    is_healthy = m["error_rate"] < 0.3 and m["latency"] < 1.5
+    cpu, lat, err, mem = get_metrics()
     return jsonify({
-        "status":    "healthy" if is_healthy else "degraded",
-        "scenario":  current_scenario,
-        "error_rate": round(m["error_rate"], 3),
-        "latency":   round(m["latency"], 3),
-        "cpu":       round(m["cpu"], 3),
+        "status":      "healthy" if err < 0.3 else "degraded",
+        "scenario":    current_scenario,
+        "degradation": degradation_level,
+        "error_rate":  round(err, 3),
+        "latency":     round(lat, 3),
+        "cpu":         round(cpu, 3),
     })
 
 
@@ -237,49 +158,65 @@ def metrics():
     return generate_latest(), 200, {"Content-Type": CONTENT_TYPE_LATEST}
 
 
-@app.route("/demo/<scenario>")
-def demo(scenario):
-    global current_scenario, scenario_start
+# ── Demo scenario triggers ───────────────────────────────────────────────────
 
-    if scenario not in SCENARIOS:
+@app.route("/demo/<scenario>")
+def trigger_demo(scenario):
+    global current_scenario, degradation_level, scenario_start
+
+    if scenario not in SCENARIOS and scenario != "recover":
         return jsonify({
-            "status": "unknown scenario",
-            "available": list(SCENARIOS.keys()),
+            "error": "unknown scenario",
+            "available": list(SCENARIOS.keys())
         }), 400
 
-    current_scenario = scenario
-    scenario_start   = time.time()
+    if scenario == "recover":
+        current_scenario  = "normal"
+        degradation_level = 0
+        scenario_start    = time.time()
+        return jsonify({"status": "recovered", "scenario": "normal"})
 
-    delay = SCENARIO_RECOVERY_DELAY.get(scenario, 15)
-    threading.Thread(target=_auto_recover, args=(delay,), daemon=True).start()
+    current_scenario  = scenario
+    degradation_level = 5 if SCENARIOS[scenario][2] > 0.5 else 3
+    scenario_start    = time.time()
 
-    print(f"[demo] triggered: {scenario} | auto-recover in {delay}s")
+    # auto recover after duration
+    duration = SCENARIO_DURATION.get(scenario, 30)
+    def _recover():
+        global current_scenario, degradation_level
+        time.sleep(duration)
+        if current_scenario == scenario:  # only if not changed
+            current_scenario  = "normal"
+            degradation_level = 0
+            print(f"[demo] auto-recovered from {scenario}")
+    threading.Thread(target=_recover, daemon=True).start()
+
     return jsonify({
-        "status":   "scenario triggered",
-        "scenario": scenario,
-        "description": _scenario_description(scenario),
-        "auto_recover_in": delay,
+        "status":    "triggered",
+        "scenario":  scenario,
+        "duration":  duration,
+        "signature": dict(zip(
+            ["cpu", "latency", "errors", "memory_mult"],
+            SCENARIOS[scenario]
+        ))
     })
 
 
-@app.route("/demo/list")
-def demo_list():
-    return jsonify({"scenarios": list(SCENARIOS.keys())})
+# legacy break/fix for backward compatibility
+@app.route("/break")
+def break_service():
+    global degradation_level
+    degradation_level = min(degradation_level + 1, 5)
+    return jsonify({"level": degradation_level})
 
 
-def _scenario_description(s: str) -> str:
-    return {
-        "payment_failure":    "High error rate, low CPU — gateway issue",
-        "traffic_overload":   "CPU spike + latency spike together",
-        "memory_leak":        "Memory growing linearly over time",
-        "bad_deployment":     "Sudden error spike after stable period",
-        "db_slowdown":        "High latency, moderate errors, low CPU",
-        "cascade_failure":    "Everything degrading simultaneously",
-        "network_latency":    "Extreme latency, low errors, normal CPU",
-        "recovery":           "Metrics returning to normal after incident",
-        "predicted_failure":  "CPU + memory slowly rising toward failure",
-        "resource_exhaustion":"CPU sustained >90%, latency creeping up",
-    }.get(s, "Unknown scenario")
+@app.route("/fix")
+def fix_service():
+    global current_scenario, degradation_level
+    degradation_level = max(0, degradation_level - 1)
+    if degradation_level == 0:
+        current_scenario = "normal"
+    return jsonify({"level": degradation_level})
 
 
 if __name__ == "__main__":

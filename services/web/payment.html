@@ -760,11 +760,13 @@
 </div>
 
 
+
 <script>
   let txCount = Math.floor(Math.random() * 8000) + 42000;
   let checkInterval;
 
   document.getElementById('txCount').textContent = txCount.toLocaleString();
+  
 
   // Increment counter naturally
   setInterval(() => {
@@ -874,6 +876,16 @@
       sysText.textContent = 'Gateway unreachable — Neuro-Ops responding';
     }
   }
+
+  let neuroOpsEnabled = true;
+
+async function toggleNeuroOps() {
+  neuroOpsEnabled = !neuroOpsEnabled;
+
+  await fetch(`http://localhost:5001/toggle?state=${neuroOpsEnabled}`);
+
+  console.log("Neuro-Ops:", neuroOpsEnabled ? "ON" : "OFF");
+}
 
   checkHealth();
   setInterval(checkHealth, 5000);
